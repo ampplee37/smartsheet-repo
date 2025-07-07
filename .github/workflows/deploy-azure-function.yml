@@ -1,13 +1,13 @@
 name: Deploy Azure Function
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
 
 env:
-  AZURE_FUNCTIONAPP_NAME: smartsheet-project-automation  # Updated function app name
   AZURE_FUNCTIONAPP_PACKAGE_PATH: '.'
   PYTHON_VERSION: '3.11'
 
@@ -38,4 +38,6 @@ jobs:
       with:
         app-name: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
         package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-        publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }} 
+        publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+        scm-do-build-during-deployment: true
+        enable-oryx-build: true 
