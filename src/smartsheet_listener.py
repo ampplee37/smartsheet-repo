@@ -97,13 +97,47 @@ class SmartsheetListener:
             Optional[Dict[str, Any]]: Extracted row data if relevant, None otherwise
         """
         try:
-            # Check if this is a row update event
+            # Check if this is a webhook with events array (new format)
+            events = webhook_data.get('events', [])
+            if events:
+                logger.info(f"Found {len(events)} events in webhook payload")
+                
+                # Look for row update events
+                row_events = [event for event in events if event.get('objectType') == 'row' and event.get('eventType') == 'updated']
+                
+                if not row_events:
+                    logger.info("No row update events found in webhook payload")
+                    return None
+                
+                # Use the first row event
+                row_event = row_events[0]
+                row_id = row_event.get('id')
+                sheet_id = webhook_data.get('scopeObjectId')
+                
+                logger.info(f"Found row update event for row {row_id} in sheet {sheet_id}")
+                
+                # For row updates, we need to fetch the actual row data from Smartsheet API
+                # since the webhook doesn't include the full row data
+                if self.client and row_id and sheet_id:
+                    try:
+                        row_details = self.get_row_details(int(sheet_id), int(row_id))
+                        # Ensure row_id is properly set in the returned data
+                        row_details['row_id'] = row_details.get('id')
+                        return row_details
+                    except Exception as e:
+                        logger.error(f"Failed to get row details for row {row_id}: {e}")
+                        return None
+                else:
+                    logger.warning("Cannot fetch row details - missing client, row_id, or sheet_id")
+                    return None
+            
+            # Legacy format check (single eventType) - only process if no events array was found
             event_type = webhook_data.get('eventType')
             if event_type != 'ROW_UPDATED':
                 logger.info(f"Ignoring non-row-update event: {event_type}")
                 return None
             
-            # Extract row information
+            # Extract row information (legacy format)
             row_data = webhook_data.get('row', {})
             if not row_data:
                 logger.warning("No row data found in webhook payload")
@@ -328,6 +362,7 @@ class SmartsheetListener:
         """
         try:
             logger.info("Starting webhook event processing")
+            logger.info(f"Payload length: {len(payload)} characters")
             
             if signature and webhook_secret:
                 logger.info("Validating webhook signature...")
@@ -340,14 +375,21 @@ class SmartsheetListener:
             
             webhook_data = self.parse_webhook_payload(payload)
             logger.info(f"Parsed webhook data, event type: {webhook_data.get('eventType')}")
+            logger.info(f"Webhook ID: {webhook_data.get('webhookId')}")
+            logger.info(f"Scope: {webhook_data.get('scope')}")
+            logger.info(f"Scope Object ID: {webhook_data.get('scopeObjectId')}")
             
             if webhook_data.get('eventType') == 'WEBHOOK_CHALLENGE':
                 logger.info("Processing webhook challenge")
                 challenge = webhook_data.get('challenge')
-                return {
-                    'type': 'challenge',
-                    'response': self.validate_webhook_challenge(challenge)
-                }
+                if challenge and isinstance(challenge, str):
+                    return {
+                        'type': 'challenge',
+                        'response': self.validate_webhook_challenge(challenge)
+                    }
+                else:
+                    logger.warning("Webhook challenge received but no valid challenge string found")
+                    return None
             
             logger.info("Extracting row data...")
             row_data = self.extract_row_data(webhook_data)

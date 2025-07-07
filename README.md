@@ -26,6 +26,8 @@ Automated workflow that creates SharePoint folder structures, OneNote notebooks,
 - **Webhook Processing**: Real-time processing of Smartsheet row updates
 - **Error Handling**: Comprehensive logging and retry mechanisms with exponential backoff
 - **Resilient Operations**: Automatic retry logic for transient failures (403 errors, provisioning delays)
+- **Smartsheet Hyperlink Updates**: Updates the "Public Notebook" column with clickable links to OneNote notebooks/sections
+- **Template-Based Workflows**: Uses configurable templates for different project types
 
 ## Current Status
 
@@ -151,6 +153,96 @@ Each OneNote page contains a structured table with the following project informa
 
 ### Retry Logic
 The system includes automatic retry logic for OneNote section creation to handle Microsoft Graph API provisioning delays (403 errors).
+
+## Smartsheet Integration
+
+### Column Mappings
+
+The system uses the following Smartsheet column IDs:
+
+| Column Name | Column ID | Purpose |
+|-------------|-----------|---------|
+| Sales Stage | 593432251944836 | Triggers workflow when set to "Closed Won" |
+| Project Category | 5878702367002500 | Determines template folder structure |
+| Project Name | 3534360453271428 | Used for section naming |
+| Description | 1375102739632004 | **Display text for OneNote hyperlinks** |
+| Company Name | 1475623376867204 | Used for notebook naming |
+| Customer Contact | 7911781646421892 | Contact information |
+| Site Address | 1611314616291204 | Project location |
+| Opportunity ID | 3408182019051396 | Unique project identifier |
+| Public Notebook | 3086497829048196 | **Column that gets updated with OneNote hyperlinks** |
+
+### Hyperlink Functionality
+
+When a deal is marked as "Closed Won", the system:
+
+1. Creates OneNote notebook and section for the project
+2. Updates the "Public Notebook" column (ID: 3086497829048196) with a hyperlink
+3. **Uses the Project Description as the display text** for the hyperlink
+4. Links to either the section URL (preferred) or notebook URL
+
+The hyperlink will display the project description text and link directly to the OneNote section when clicked.
+
+### Section and Page Naming
+
+OneNote sections and pages are named using the format: **"{Opportunity ID} - {Project Name}"**
+
+For example:
+- Section name: `OPP-2024-001 - Acme Corp Website Redesign`
+- Page title: `OPP-2024-001 - Acme Corp Website Redesign`
+
+This format makes it easy to identify projects by their opportunity ID first, followed by the project name.
+
+## Configuration
+
+### Environment Variables
+
+Required environment variables:
+
+```bash
+# Azure AD Configuration
+CLIENT_ID=your_client_id
+CLIENT_SECRET=your_client_secret
+TENANT_ID=your_tenant_id
+
+# Smartsheet Configuration
+SMTSHEET_TOKEN=your_smartsheet_token
+SMTSHEET_ID=your_smartsheet_id
+
+# SharePoint Configuration
+SHAREPOINT_SITE_ID=your_sharepoint_site_id
+
+# Bot Authentication for OneNote
+BVC_ONENOTE_INGEST_BOT_ID=your_bot_client_id
+BVC_BOT_REFRESH_TOKEN=your_bot_refresh_token
+BVC_BOT_CLIENT_SECRET=your_bot_client_secret
+
+# Azure Storage
+STORAGE_CONNECTION_STRING=your_storage_connection_string
+```
+
+## Testing
+
+### Test Smartsheet Hyperlink Functionality
+
+Run the hyperlink test script to verify the Smartsheet integration:
+
+```bash
+python test_smartsheet_hyperlink.py
+```
+
+This will test:
+- Updating rows with project description as display text
+- Fallback to notebook name if no description available
+- Section URL vs notebook URL preferences
+
+### Test Webhook Processing
+
+Test the webhook processing with a local Azure Function:
+
+```bash
+python test_smartsheet_webhook.py
+```
 
 ## Deployment
 

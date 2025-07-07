@@ -46,13 +46,20 @@ def main():
         forced_cells.append({"columnId": col_id, "value": value})
 
     webhook_payload = {
-        "eventType": "ROW_UPDATED",
-        "objectId": int(smartsheet_id),
-        "row": {
-            "id": top_row.id,
-            "rowNumber": top_row.row_number,
-            "cells": forced_cells,
-        },
+        "nonce": "test-nonce-123",
+        "timestamp": "2025-07-07T15:17:54.826+00:00",
+        "webhookId": 1783090705131396,
+        "scope": "sheet",
+        "scopeObjectId": int(smartsheet_id),
+        "events": [
+            {
+                "objectType": "row",
+                "eventType": "updated",
+                "id": top_row.id,
+                "userId": 7140110736091012,
+                "timestamp": "2025-07-07T15:16:54.000+00:00"
+            }
+        ]
     }
 
     print("\n--- Webhook Payload Example (SMT_SALES_STAGE forced to 'Closed Won') ---")

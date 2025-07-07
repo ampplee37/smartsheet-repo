@@ -28,13 +28,17 @@ class SmartsheetUpdater:
         # Column ID for "Public Notebook" column
         self.public_notebook_column_id = 3086497829048196
         
+        # Column ID for "Description" column (Project Description)
+        self.description_column_id = 1375102739632004
+        
     def update_row_with_onenote_url(
         self, 
         sheet_id: int, 
         row_id: int, 
         notebook_name: str, 
-        notebook_url: str,
-        section_url: Optional[str] = None
+        notebook_url: Optional[str] = None,
+        section_url: Optional[str] = None,
+        project_description: Optional[str] = None
     ) -> bool:
         """
         Update a Smartsheet row with a hyperlink to the OneNote notebook/section.
@@ -42,9 +46,10 @@ class SmartsheetUpdater:
         Args:
             sheet_id: Smartsheet sheet ID
             row_id: Row ID to update
-            notebook_name: Display name for the hyperlink
+            notebook_name: Display name for the hyperlink (fallback if no project_description)
             notebook_url: URL to the OneNote notebook
             section_url: URL to the OneNote section (preferred over notebook_url)
+            project_description: Project description to use as display text (preferred over notebook_name)
             
         Returns:
             bool: True if successful, False otherwise
@@ -56,8 +61,16 @@ class SmartsheetUpdater:
             if not target_url:
                 logger.error("No URL provided for OneNote link")
                 return False
+            
+            # Use project description as display text if available, otherwise use notebook name
+            display_text = project_description or notebook_name
+            
+            if not display_text:
+                logger.error("No display text provided for OneNote link")
+                return False
                 
             logger.info(f"Updating Smartsheet row {row_id} with OneNote URL: {target_url}")
+            logger.info(f"Display text: {display_text}")
             
             # Use raw API format (like the working example provided)
             payload = {
@@ -65,7 +78,7 @@ class SmartsheetUpdater:
                 "cells": [
                     {
                         "columnId": self.public_notebook_column_id,
-                        "value": notebook_name,
+                        "value": display_text,
                         "hyperlink": {
                             "url": target_url
                         }

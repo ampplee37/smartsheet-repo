@@ -395,15 +395,22 @@ class OneNoteManager:
             section_id = section.get('id')
             if not section_id:
                 raise Exception("Failed to get section ID")
-            # Build the page title as '{ProjectName} - {OpportunityID}'
+            # Build the page title as '{OpportunityID} - {ProjectName}' (reversed format)
             project_name = smartsheet_data.get('3534360453271428', section_name)  # Project Name
             opp_id = smartsheet_data.get('3408182019051396', '')  # Opportunity ID
-            page_title = f"{project_name} - {opp_id}" if opp_id else project_name
-            # Create a page in the section with a two-column table of smartsheet_data
-            page_html = self._build_two_column_table_html(page_title, smartsheet_data)
-            logger.info(f"Creating page in section '{section_name}' with Smartsheet data table")
-            page = graph_client.create_page_in_section(site_id, section_id, page_html)
-            logger.info(f"Successfully created page in section '{section_name}'")
+            page_title = f"{opp_id} - {project_name}" if opp_id else project_name
+            
+            # Check if a page with this title already exists in the section
+            existing_page = self.get_page_by_title_site(site_id, section_id, page_title)
+            if existing_page:
+                logger.info(f"Page with title '{page_title}' already exists in section '{section_name}', skipping page creation")
+                page = existing_page
+            else:
+                # Create a page in the section with a two-column table of smartsheet_data
+                page_html = self._build_two_column_table_html(page_title, smartsheet_data)
+                logger.info(f"Creating page in section '{section_name}' with Smartsheet data table")
+                page = graph_client.create_page_in_section(site_id, section_id, page_html)
+                logger.info(f"Successfully created page in section '{section_name}'")
             
             # Extract URLs from the responses
             notebook_url = None
@@ -533,6 +540,34 @@ class OneNoteManager:
             
         except Exception as e:
             logger.error(f"Failed to get section by name '{section_name}' in site notebook: {e}")
+            return None
+
+    def get_page_by_title_site(self, site_id: str, section_id: str, page_title: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a specific page by title in a site notebook section.
+        
+        Args:
+            site_id: SharePoint site ID
+            section_id: OneNote section ID
+            page_title: Page title
+            
+        Returns:
+            Optional[Dict[str, Any]]: Page information if found, None otherwise
+        """
+        try:
+            response = graph_client.get_site_notebook_section_pages(site_id, section_id)
+            pages = response.get('value', [])
+            
+            for page in pages:
+                if page.get('title') == page_title:
+                    logger.info(f"Found page '{page_title}' with ID: {page.get('id')}")
+                    return page
+            
+            logger.info(f"No page found with title '{page_title}' in section {section_id}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to get page by title '{page_title}' in site notebook: {e}")
             return None
 
 

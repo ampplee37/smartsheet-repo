@@ -270,15 +270,16 @@ def handle_closed_won_deal(event_data: Dict[str, Any]) -> func.HttpResponse:
             project_name=project.project_name
         )
         # Create OneNote notebook, section, and page using metadata
-        # Construct section name as "ProjectName - Opp ID"
-        opp_id = project_info.get('3408182019051396', 'Unknown')  # SMT_PROJECT_ID from .env
-        section_name = f"{project.project_name} - {opp_id}"
+        # Construct section name as "Opp ID - ProjectName" (reversed format)
+        opp_id = project_info.get('3408182019051396', 'Unknown')  # Opportunity ID
+        project_name = project_info.get('3534360453271428', project.project_name)  # Project Name
+        section_name = f"{opp_id} - {project_name}"
         
         notebook_result = create_project_notebook_and_section_with_metadata(
             site_id=project.site_id,
             parent_folder_id=project.parent_folder_id,
             notebook_name=project.company_name,  # Use CompanyName for notebook name
-            section_name=section_name,           # Use "ProjectName - Opp ID" for section name
+            section_name=section_name,           # Use "Opp ID - ProjectName" for section name
             smartsheet_data=project_info         # Pass all available Smartsheet/project data
         )
         response_data = {
@@ -451,7 +452,7 @@ def copy_template_folders_skip_existing(
         }
 
 
-def resolve_full_graph_site_id(site_id: str, hostname: str = None) -> str:
+def resolve_full_graph_site_id(site_id: str, hostname: Optional[str] = None) -> str:
     """
     Given a site_id (which may be just a GUID), resolve the full Graph site ID using the Graph API.
     If already in full format, return as is.
@@ -504,13 +505,17 @@ def create_project_notebook_and_section_with_metadata(site_id: str, parent_folde
             row_id = smartsheet_data.get('row_id')
             sheet_id = int(config.SMTSHEET_ID)
             
+            # Get project name from Smartsheet data (for hyperlink display text)
+            project_name_for_link = smartsheet_data.get('3534360453271428')  # Project Name column ID
+            
             if row_id and (notebook_url or section_url):
                 success = smartsheet_updater.update_row_with_onenote_url(
                     sheet_id=sheet_id,
                     row_id=row_id,
                     notebook_name=notebook_name,
-                    notebook_url=notebook_url,
-                    section_url=section_url
+                    notebook_url=notebook_url or "",
+                    section_url=section_url,
+                    project_description=project_name_for_link
                 )
                 if success:
                     logger.info(f"Successfully updated Smartsheet row {row_id} with OneNote URL")

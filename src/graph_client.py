@@ -533,6 +533,20 @@ class GraphClient:
         endpoint = f"/sites/{site_id}/onenote/notebooks/{notebook_id}/sections"
         return self.graph_request_delegated("GET", endpoint)
 
+    def get_site_notebook_section_pages(self, site_id: str, section_id: str) -> Dict[str, Any]:
+        """
+        Get pages in a OneNote section in a SharePoint site using delegated authentication.
+        
+        Args:
+            site_id: SharePoint site ID
+            section_id: Section ID
+            
+        Returns:
+            Dict[str, Any]: Pages response
+        """
+        endpoint = f"/sites/{site_id}/onenote/sections/{section_id}/pages"
+        return self.graph_request_delegated("GET", endpoint)
+
     @tenacity.retry(
         reraise=True,
         stop=tenacity.stop_after_attempt(config.MAX_RETRIES),
