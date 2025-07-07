@@ -1,0 +1,4 @@
+These are notes:
+|
+This will get the folder IDs of all our template folders via Graph Explorer.  
+https://graph.microsoft.com/v1.0/sites/bvcollective.sharepoint.com%2C08bee518-b476-4fb9-95ff-1a6b30a23d7a%2C3eb6c052-ce82-4449-a860-470b0025611f/drive/root:/Information%20Technology/Automation/BVC:/children?$select=name,id

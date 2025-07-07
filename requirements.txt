@@ -1,0 +1,17 @@
+azure-functions==1.17.0
+azure-data-tables==12.4.4
+azure-identity==1.15.0
+azure-storage-blob==12.19.0
+msal==1.25.0
+requests==2.31.0
+smartsheet-python-sdk>=3.0.0
+python-dotenv==1.0.0
+psycopg2-binary==2.9.9
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-mock==3.12.0
+flake8==6.1.0
+black==23.11.0
+mypy==1.7.1
+tenacity>=8.0.0
+azure-core>=1.29.0

@@ -1,0 +1,60 @@
+{
+    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#sites('bvcollective.sharepoint.com%2C08bee518-b476-4fb9-95ff-1a6b30a23d7a%2C3eb6c052-ce82-4449-a860-470b0025611f')/drive/root/children(name,id)",
+    "value": [
+        {
+            "@odata.etag": "\"{3231F529-EBB8-4521-BCF5-B4A6E1187CA5},11\"",
+            "id": "01DVHBZFJJ6UYTFOHLEFC3Z5NUU3QRQ7FF",
+            "name": "Complex Design Build Standard Folder Structure"
+        },
+        {
+            "@odata.etag": "\"{93CD784D-DEDA-491C-B01E-EA2265C4F791},6\"",
+            "id": "01DVHBZFKNPDGZHWW6DRE3AHXKEJS4J54R",
+            "name": "Consulting Retainer Standard Folder Structure"
+        },
+        {
+            "@odata.etag": "\"{1A58F26D-C559-4A72-A117-AF2E4E285BA8},4\"",
+            "id": "01DVHBZFLN6JMBUWOFOJFKCF5PFZHCQW5I",
+            "name": "Hardware Order Folder Structure"
+        },
+        {
+            "@odata.etag": "\"{96D80984-01CD-41F1-BF01-F8F00ED0CA99},1\"",
+            "id": "01DVHBZFMEBHMJNTIB6FA36APY6AHNBSUZ",
+            "name": "JSON Files"
+        },
+        {
+            "@odata.etag": "\"{E7F3700F-C930-434B-91BA-58A9C675C44C},14\"",
+            "id": "01DVHBZFIPODZ6OMGJJNBZDOSYVHDHLRCM",
+            "name": "Rollout Standard Folder Structure"
+        },
+        {
+            "@odata.etag": "\"{9A2F9080-1DBC-4FF2-89D6-B801EDDB99BD},9\"",
+            "id": "01DVHBZFMASAXZVPA56JHYTVVYAHW5XGN5",
+            "name": "Sales Pipeline Folder Structure"
+        },
+        {
+            "@odata.etag": "\"{34EBE075-ED8C-4F8E-9F0A-E964F024B576},7\"",
+            "id": "01DVHBZFLV4DVTJDHNRZHZ6CXJMTYCJNLW",
+            "name": "Simple Installs Folder Structure"
+        },
+        {
+            "@odata.etag": "\"{7468A91B-D6D9-456C-9347-505C7A103CEF},1\"",
+            "id": "01DVHBZFI3VFUHJWOWNRCZGR2QLR5BAPHP",
+            "name": "Sold Files"
+        },
+        {
+            "@odata.etag": "\"{E6C37076-8930-411A-8371-1C6592037241},2\"",
+            "id": "01DVHBZFLWODB6MMEJDJAYG4I4MWJAG4SB",
+            "name": "Website Variables"
+        },
+        {
+            "@odata.etag": "\"{349F9344-742C-43AF-B49F-CBEA65D7870F},215\"",
+            "id": "01DVHBZFKESOPTILDUV5B3JH6L5JS5PBYP",
+            "name": "Sales Pipeline Flows and Layout.xlsx"
+        },
+        {
+            "@odata.etag": "\"{87476A2A-1B2A-48B1-BA1C-9472A9B89A09},38\"",
+            "id": "01DVHBZFJKNJDYOKQ3WFELUHEUOKU3RGQJ",
+            "name": "Site Location Contractors.xlsx"
+        }
+    ]
+}
