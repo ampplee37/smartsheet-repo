@@ -4,8 +4,8 @@ Handles creating and managing OneNote notebooks and sections.
 """
 
 import logging
-from typing import Dict, Any, Optional, List
 import re
+from typing import Dict, Any, Optional, List
 import json
 try:
     from .graph_client import graph_client
@@ -15,6 +15,72 @@ except ImportError:
     from config import config
 
 logger = logging.getLogger(__name__)
+
+
+def get_cell_str(cell) -> str:
+    """
+    Extract string value from a Smartsheet cell.
+    
+    Args:
+        cell: Cell value from Smartsheet (can be dict, string, or other types)
+        
+    Returns:
+        str: String value from the cell
+    """
+    if isinstance(cell, dict):
+        return cell.get('displayValue') or cell.get('value') or ''
+    return str(cell) if cell is not None else ''
+
+
+def sanitize_onenote_name(name: str) -> str:
+    """
+    Sanitize a name for use in OneNote notebooks and sections.
+    Removes forbidden characters: ? * \ / : < > | '
+    
+    Args:
+        name: Original name
+        
+    Returns:
+        str: Sanitized name
+    """
+    if not name:
+        return 'Untitled'
+    
+    # Remove forbidden characters: ? * \ / : < > | '
+    sanitized = re.sub(r"[?*\\\\/:<>|']", "", name)
+    
+    # Remove leading/trailing whitespace
+    sanitized = sanitized.strip()
+    
+    # If empty after sanitization, use default
+    if not sanitized:
+        return 'Untitled'
+    
+    return sanitized
+
+
+def get_display_text(cell):
+    """
+    Extract the display value for a cell, or value, or empty string.
+    If the cell has a hyperlink, return an HTML link.
+    If the value looks like an email, return a mailto link.
+    """
+    if isinstance(cell, dict):
+        display = cell.get('displayValue') or cell.get('value') or ''
+        hyperlink = cell.get('hyperlink')
+        # If hyperlink is a dict with a url, render as a link
+        if hyperlink and isinstance(hyperlink, dict) and hyperlink.get('url'):
+            url = hyperlink['url']
+            label = display or hyperlink.get('label') or url
+            return f'<a href="{url}">{label}</a>'
+        # If value looks like an email, render as mailto
+        value = cell.get('value')
+        if value and isinstance(value, str) and '@' in value and not display:
+            return f'<a href="mailto:{value}">{value}</a>'
+        return display
+    elif isinstance(cell, str) and '@' in cell:
+        return f'<a href="mailto:{cell}">{cell}</a>'
+    return str(cell) if cell is not None else ''
 
 
 class OneNoteManager:
@@ -213,7 +279,7 @@ class OneNoteManager:
     def create_project_notebook_with_sections(
         self, 
         project_name: str, 
-        section_names: List[str] = None
+        section_names: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Create a complete OneNote notebook for a project with multiple sections.
@@ -328,11 +394,27 @@ class OneNoteManager:
         
         return self.create_project_notebook_with_sections(project_name, standard_sections)
 
-    def _format_notebook_name(self, customer_name: str) -> str:
+    def _format_notebook_name(self, customer_name) -> str:
         """
         Format the OneNote notebook name as '<Customer> - Public'.
+        
+        Args:
+            customer_name: Customer name (can be string, dict, or other types)
+            
+        Returns:
+            str: Formatted and sanitized notebook name
         """
-        return f"{customer_name} - Public"
+        # Extract string value from cell if it's a dict
+        customer_str = get_cell_str(customer_name)
+        
+        # Sanitize the name
+        sanitized_customer = sanitize_onenote_name(customer_str)
+        
+        # Format as "Customer - Public"
+        notebook_name = f"{sanitized_customer} - Public"
+        
+        logger.info(f"Formatted notebook name: '{customer_str}' -> '{notebook_name}'")
+        return notebook_name
 
     def ensure_project_section_with_metadata(self, site_id: str, parent_folder_id: str, notebook_name: str, section_name: str, smartsheet_data: dict) -> Dict[str, Any]:
         """
@@ -353,6 +435,26 @@ class OneNoteManager:
             # Always use customer name + ' - Public' for the notebook name
             customer_name = smartsheet_data.get('1475623376867204', notebook_name)
             notebook_name = self._format_notebook_name(customer_name)
+            
+            # Format and sanitize the section name
+            project_name = smartsheet_data.get('3534360453271428', section_name)  # Project Name
+            opp_id = smartsheet_data.get('3408182019051396', '')  # Opportunity ID
+            
+            # Extract string values and sanitize
+            project_str = get_cell_str(project_name)
+            opp_str = get_cell_str(opp_id)
+            
+            # Build section name as "Opp ID - ProjectName" (reversed format)
+            if opp_str:
+                section_name = f"{opp_str} - {project_str}"
+            else:
+                section_name = project_str
+            
+            # Sanitize the section name
+            section_name = sanitize_onenote_name(section_name)
+            
+            logger.info(f"Formatted section name: '{section_name}'")
+            
             # The notebook will be created at the site level, named after the folder/project
             # Check if notebook exists at the site level
             notebooks_response = graph_client.get_site_notebooks(site_id=site_id)
@@ -364,7 +466,9 @@ class OneNoteManager:
                     notebook = graph_client.create_notebook(site_id, notebook_name)
                 except Exception as e:
                     # If 409, try to find the notebook again (it may have just been created or already existed)
-                    if hasattr(e, 'response') and e.response is not None and e.response.status_code == 409:
+                    response = getattr(e, 'response', None)
+                    status_code = getattr(response, 'status_code', None) if response is not None else None
+                    if status_code == 409:
                         logger.warning(f"409 Conflict: Notebook already exists at site level, searching for existing notebook '{notebook_name}'")
                         notebooks_response = graph_client.get_site_notebooks(site_id=site_id)
                         notebooks = notebooks_response.get('value', [])
@@ -396,9 +500,8 @@ class OneNoteManager:
             if not section_id:
                 raise Exception("Failed to get section ID")
             # Build the page title as '{OpportunityID} - {ProjectName}' (reversed format)
-            project_name = smartsheet_data.get('3534360453271428', section_name)  # Project Name
-            opp_id = smartsheet_data.get('3408182019051396', '')  # Opportunity ID
-            page_title = f"{opp_id} - {project_name}" if opp_id else project_name
+            # Use the already extracted and sanitized values
+            page_title = f"{opp_str} - {project_str}" if opp_str else project_str
             
             # Check if a page with this title already exists in the section
             existing_page = self.get_page_by_title_site(site_id, section_id, page_title)
@@ -456,7 +559,7 @@ class OneNoteManager:
 
     def _build_two_column_table_html(self, title, data):
         logger = logging.getLogger(__name__)
-        # Mapping of Smartsheet column IDs to friendly names (omit 'Customer')
+        # Mapping of Smartsheet column IDs to friendly names (now includes RFP Scope and DE Consulting Scope)
         COLUMNS = [
             ("5878702367002500", "Project Category"),
             ("3534360453271428", "Project Name"),
@@ -465,6 +568,8 @@ class OneNoteManager:
             ("7911781646421892", "Customer Contact"),
             ("1611314616291204", "Site Address"),
             ("3408182019051396", "Opportunity ID"),
+            ("677356797906820", "RFP Scope"),
+            ("1639045752639364", "DE Consulting Scope"),
         ]
         # Clean the title and values as before
         title = self._clean_text_for_onenote(title)
@@ -472,15 +577,23 @@ class OneNoteManager:
         for col_id, friendly_name in COLUMNS:
             raw_value = data.get(col_id, "")
             logger.debug(f"Raw value for {friendly_name} ({col_id}): {repr(raw_value)}")
-            value = self._clean_text_for_onenote(raw_value, page_title=title)
-            logger.debug(f"Cleaned value for {friendly_name}: {repr(value)}")
-            if col_id == "7911781646421892" and isinstance(data.get(col_id), dict):
-                name = data[col_id].get("name", "")
-                email = data[col_id].get("email", "")
-                if name and email:
-                    value = f'<a href="mailto:{email}">{name}</a>'
-                elif email:
-                    value = f'<a href="mailto:{email}">{email}</a>'
+            # Special handling for DE Consulting Scope (multi-select)
+            if col_id == "1639045752639364":
+                value = raw_value
+                # If value is a dict with a list, join the list
+                if isinstance(value, dict):
+                    v = value.get('displayValue') or value.get('value')
+                    if isinstance(v, list):
+                        value = ', '.join(str(item) for item in v)
+                    else:
+                        value = v or ''
+                elif isinstance(value, list):
+                    value = ', '.join(str(item) for item in value)
+                else:
+                    value = get_display_text(value)
+            else:
+                value = get_display_text(raw_value)
+            logger.debug(f"Display value for {friendly_name}: {repr(value)}")
             rows += f"<tr><td>{friendly_name}</td><td>{value}</td></tr>"
         html = f"""
 <!DOCTYPE html>
@@ -569,6 +682,118 @@ class OneNoteManager:
         except Exception as e:
             logger.error(f"Failed to get page by title '{page_title}' in site notebook: {e}")
             return None
+
+    def add_opportunity_page_for_row(self, site_id: str, notebook_id: str, customer_name: str, opp_id: str, project_name: str, row_data: dict, column_id_to_name: dict = None) -> dict:
+        """
+        Add a page to the Opportunity Notebook for a new Smartsheet row.
+        - Finds or creates a section named after the customer.
+        - Finds or skips (if exists) a page titled 'Opp ID - Project Name'.
+        - Builds a table with all non-empty fields/values from row_data.
+        - Uses column_id_to_name mapping for friendly column names if provided.
+        - Logs errors if notebook/section cannot be found/created.
+        Args:
+            site_id: SharePoint site ID
+            notebook_id: Opportunity Notebook ID
+            customer_name: Customer name (section name)
+            opp_id: Opportunity ID (for page title)
+            project_name: Project Name (for page title)
+            row_data: Dict of all Smartsheet fields/values
+            column_id_to_name: Dict mapping column IDs to names (optional)
+        Returns:
+            dict: Info about the created or found page, or error info
+        """
+        try:
+            section = self.get_section_by_name_site(site_id, notebook_id, customer_name)
+            if not section:
+                section = graph_client.create_site_notebook_section(site_id, notebook_id, customer_name)
+                if not section or not section.get('id'):
+                    logger.error(f"Failed to create/find section '{customer_name}' in Opportunity Notebook {notebook_id}")
+                    return {"error": f"Section creation failed: {customer_name}"}
+            section_id = section.get('id')
+            if not section_id:
+                logger.error(f"Section ID is None for section '{customer_name}' in Opportunity Notebook {notebook_id}")
+                return {"error": f"Section ID is None for section: {customer_name}"}
+            page_title = f"{opp_id} - {project_name}" if opp_id else project_name
+            existing_page = self.get_page_by_title_site(site_id, section_id, page_title)
+            if existing_page:
+                logger.info(f"Page '{page_title}' already exists in section '{customer_name}', skipping creation.")
+                return {"skipped": True, "page": existing_page}
+            page_html = self._build_full_table_html(page_title, row_data, column_id_to_name=column_id_to_name or {})
+            page = graph_client.create_page_in_section(site_id, section_id, page_html)
+            logger.info(f"Successfully created Opportunity page '{page_title}' in section '{customer_name}'")
+            return {"created": True, "page": page}
+        except Exception as e:
+            logger.error(f"Error adding Opportunity page for row: {e}")
+            return {"error": str(e)}
+
+    def _build_full_table_html(self, title, data, column_id_to_name=None):
+        """
+        Build an HTML table with all non-empty fields/values from data.
+        Args:
+            title: Page title
+            data: Dict of all fields/values (each value is a dict with value, displayValue, hyperlink)
+            column_id_to_name: Dict mapping column IDs to names (optional)
+        Returns:
+            str: HTML content for the OneNote page
+        """
+        title = self._clean_text_for_onenote(title)
+        if column_id_to_name is None:
+            column_id_to_name = {}
+        rows = ""
+        for key, cell in data.items():
+            if not isinstance(cell, dict):
+                continue
+            value = cell.get('displayValue') or cell.get('value')
+            if value is None or value == "":
+                continue
+            friendly_name = column_id_to_name.get(key, str(key))
+            # Special handling for hyperlink column
+            if key == "1838548451020676" and cell.get('hyperlink'):
+                url = cell['hyperlink'].get('url')
+                label = cell['hyperlink'].get('label') or value
+                if url:
+                    value = f'<a href="{url}">{label}</a>'
+            elif isinstance(value, dict):
+                name = value.get("name", "")
+                email = value.get("email", "")
+                if name and email:
+                    value = f'<a href="mailto:{email}">{name}</a>'
+                elif email:
+                    value = f'<a href="mailto:{email}">{email}</a>'
+                else:
+                    value = json.dumps(value)
+            else:
+                value = self._clean_text_for_onenote(str(value), page_title=title)
+            rows += f"<tr><td>{friendly_name}</td><td>{value}</td></tr>"
+        html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <title>{title}</title>
+  <meta charset='utf-8' />
+</head>
+<body>
+  <table border='1' cellpadding='5' style='border-collapse:collapse;'>
+    <thead>
+      <tr><th>Field</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      {rows}
+    </tbody>
+  </table>
+</body>
+</html>
+"""
+        import re
+        html = re.sub(r"[\r\n]+", "", html)
+        html = re.sub(r">\s+<", "><", html)
+        html = html.strip()
+        if html.startswith('"'):
+            html = html[1:]
+        if html.endswith('"'):
+            html = html[:-1]
+        logger.info(f"Final HTML for Opportunity OneNote page:\n{html}")
+        return html
 
 
 # Global OneNote manager instance

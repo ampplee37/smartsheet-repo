@@ -10,6 +10,24 @@ from typing import Dict, Any, Optional
 import traceback
 import sys
 
+# Import utility functions from onenote_manager
+try:
+    from src.onenote_manager import get_cell_str, sanitize_onenote_name
+except ImportError:
+    # Fallback if import fails
+    def get_cell_str(cell) -> str:
+        if isinstance(cell, dict):
+            return cell.get('displayValue') or cell.get('value') or ''
+        return str(cell) if cell is not None else ''
+    
+    def sanitize_onenote_name(name: str) -> str:
+        import re
+        if not name:
+            return 'Untitled'
+        sanitized = re.sub(r"[?*\\\\/:<>|']", "", name)
+        sanitized = sanitized.strip()
+        return sanitized if sanitized else 'Untitled'
+
 # Configure logging with more detailed output
 logging.basicConfig(
     level=logging.INFO,
@@ -269,16 +287,77 @@ def handle_closed_won_deal(event_data: Dict[str, Any]) -> func.HttpResponse:
             project_category=project.project_type,  # Or whatever field is used
             project_name=project.project_name
         )
+        
+        # Find Submittals folder and update Smartsheet with its URL
+        submittals_url = None
+        try:
+            from src.folder_manager import folder_manager
+            from src.smartsheet_updater import smartsheet_updater
+            
+            # Get the project name from Smartsheet data
+            project_name = project_info.get('3534360453271428', project.project_name)  # Project Name column
+            row_id = project_info.get('row_id')
+            sheet_id = project_info.get('sheet_id')
+            
+            if row_id and sheet_id:
+                # Find the Submittals folder and get its URL
+                submittals_url = folder_manager.get_submittals_folder_url(
+                    drive_id=project.drive_id,
+                    parent_folder_id=project.job_folder_id
+                )
+                
+                if submittals_url:
+                    # Update Smartsheet with the Submittals folder URL
+                    success = smartsheet_updater.update_submittals_folder_link(
+                        sheet_id=int(sheet_id),
+                        row_id=int(row_id),
+                        project_name=project_name,
+                        folder_url=submittals_url
+                    )
+                    
+                    if success:
+                        logger.info(f"Successfully updated Smartsheet with Submittals folder URL: {submittals_url}")
+                    else:
+                        logger.error("Failed to update Smartsheet with Submittals folder URL")
+                else:
+                    logger.error("Could not find or get URL for Submittals folder")
+            else:
+                logger.warning("Missing row_id or sheet_id, cannot update Smartsheet with Submittals folder URL")
+                
+        except Exception as e:
+            logger.error(f"Error updating Smartsheet with Submittals folder URL: {e}")
+            # Don't fail the entire operation, just log the error
+        
         # Create OneNote notebook, section, and page using metadata
         # Construct section name as "Opp ID - ProjectName" (reversed format)
-        opp_id = project_info.get('3408182019051396', 'Unknown')  # Opportunity ID
-        project_name = project_info.get('3534360453271428', project.project_name)  # Project Name
-        section_name = f"{opp_id} - {project_name}"
+        opp_id_cell = project_info.get('3408182019051396', 'Unknown')  # Opportunity ID
+        project_name_cell = project_info.get('3534360453271428', project.project_name)  # Project Name
+        
+        # Extract string values from cells
+        opp_id_str = get_cell_str(opp_id_cell)
+        project_name_str = get_cell_str(project_name_cell)
+        
+        # Build section name
+        if opp_id_str and opp_id_str != 'Unknown':
+            section_name = f"{opp_id_str} - {project_name_str}"
+        else:
+            section_name = project_name_str
+        
+        # Sanitize the section name
+        section_name = sanitize_onenote_name(section_name)
+        
+        logger.info(f"Formatted section name: '{section_name}'")
+        
+        # Format notebook name using utility functions
+        notebook_name = sanitize_onenote_name(project.company_name)
+        notebook_name = f"{notebook_name} - Public"
+        
+        logger.info(f"Formatted notebook name: '{notebook_name}'")
         
         notebook_result = create_project_notebook_and_section_with_metadata(
             site_id=project.site_id,
             parent_folder_id=project.parent_folder_id,
-            notebook_name=project.company_name,  # Use CompanyName for notebook name
+            notebook_name=notebook_name,         # Use sanitized CompanyName for notebook name
             section_name=section_name,           # Use "Opp ID - ProjectName" for section name
             smartsheet_data=project_info         # Pass all available Smartsheet/project data
         )
@@ -287,6 +366,7 @@ def handle_closed_won_deal(event_data: Dict[str, Any]) -> func.HttpResponse:
             'project_type': project_type,
             'folder_results': folder_results,
             'notebook_result': notebook_result,
+            'submittals_folder_url': submittals_url,
             'row_id': project_info.get('row_id'),
             'status': 'success'
         }

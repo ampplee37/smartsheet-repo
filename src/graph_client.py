@@ -131,14 +131,18 @@ class GraphClient:
         # Acquire new token
         result = self.app.acquire_token_for_client(scopes=self.scope)
         
-        if "access_token" not in result:
-            error_msg = f"Failed to acquire token: {result.get('error_description', 'Unknown error')}"
+        if result is None or "access_token" not in result:
+            error_msg = f"Failed to acquire token: {result.get('error_description', 'Unknown error') if result else 'No result'}"
             logger.error(error_msg)
             raise Exception(error_msg)
         
         self._access_token = result["access_token"]
         # Set expiration time with 5-minute buffer
-        self._token_expires_at = time.time() + result.get("expires_in", 3600) - 300
+        expires_in = result.get("expires_in", 3600)
+        if isinstance(expires_in, (int, float)):
+            self._token_expires_at = time.time() + expires_in - 300
+        else:
+            self._token_expires_at = time.time() + 3600 - 300
         
         logger.info("Successfully acquired new access token")
         return self._access_token
@@ -217,8 +221,8 @@ class GraphClient:
         data: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
-        username: str = None,
-        password: str = None
+        username: Optional[str] = None,
+        password: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Make a delegated request to the Microsoft Graph API.
@@ -329,12 +333,13 @@ class GraphClient:
                 return response.json()
             else:
                 response.raise_for_status()
+                return {"status": "unknown"}
                 
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to check copy status: {e}")
             raise Exception(f"Failed to check copy status: {e}")
     
-    def wait_for_copy_completion(self, location_url: str, timeout: int = None) -> Dict[str, Any]:
+    def wait_for_copy_completion(self, location_url: str, timeout: Optional[int] = None) -> Dict[str, Any]:
         """
         Wait for a copy operation to complete.
         
@@ -366,7 +371,7 @@ class GraphClient:
         
         raise Exception(f"Copy operation timed out after {timeout} seconds")
     
-    def get_drive_items(self, drive_id: str, folder_id: str = None) -> Dict[str, Any]:
+    def get_drive_items(self, drive_id: str, folder_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Get items in a SharePoint drive or folder.
         
@@ -384,7 +389,7 @@ class GraphClient:
         
         return self.graph_request("GET", endpoint)
     
-    def get_site_notebooks(self, site_id: str, display_name: str = None) -> Dict[str, Any]:
+    def get_site_notebooks(self, site_id: str, display_name: Optional[str] = None) -> Dict[str, Any]:
         """
         Get OneNote notebooks for a SharePoint site using delegated authentication.
         
@@ -447,7 +452,7 @@ class GraphClient:
         logger.info(f"Creating OneNote section: {section_name}")
         return self.graph_request("POST", endpoint, data=data)
     
-    def get_user_notebooks_delegated(self, display_name: str = None) -> Dict[str, Any]:
+    def get_user_notebooks_delegated(self, display_name: Optional[str] = None) -> Dict[str, Any]:
         """
         Get OneNote notebooks for the current user using delegated authentication.
         
@@ -551,7 +556,7 @@ class GraphClient:
         reraise=True,
         stop=tenacity.stop_after_attempt(config.MAX_RETRIES),
         wait=tenacity.wait_exponential(multiplier=config.RETRY_DELAY),
-        retry=tenacity.retry_if_exception(lambda e: hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 403)
+        retry=tenacity.retry_if_exception(lambda e: isinstance(e, requests.exceptions.RequestException) and hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 403)
     )
     def create_site_notebook_section(
         self, 
@@ -615,7 +620,7 @@ class GraphClient:
             }
             response = self.graph_request_delegated("POST", endpoint, data=data)
             return response
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             # If 409 conflict, fetch the existing notebook
             if hasattr(e, 'response') and e.response is not None and e.response.status_code == 409:
                 logger.warning(f"Notebook already exists, fetching existing notebook: {notebook_name}")
@@ -661,7 +666,7 @@ class GraphClient:
             }
             response = self.graph_request_delegated("POST", endpoint, data=data)
             return response
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             # If 409 conflict, fetch the existing notebook in the folder
             if hasattr(e, 'response') and e.response is not None and e.response.status_code == 409:
                 logger.warning(f"Notebook already exists in folder, fetching existing notebook: {notebook_name}")
@@ -715,6 +720,63 @@ class GraphClient:
         response = requests.post(endpoint, headers=headers, files=files)
         response.raise_for_status()
         return response.json()
+
+    def share_folder_with_anyone_link(self, drive_id: str, item_id: str) -> Dict[str, Any]:
+        """
+        Share a SharePoint folder with "anyone with the link" permissions.
+        
+        Args:
+            drive_id: SharePoint drive ID
+            item_id: Folder item ID
+            
+        Returns:
+            Dict[str, Any]: Sharing response with webUrl
+        """
+        endpoint = f"/drives/{drive_id}/items/{item_id}/createLink"
+        data = {
+            "type": "view",
+            "scope": "anonymous"
+        }
+        
+        logger.info(f"Creating anonymous link for folder {item_id}")
+        return self.graph_request("POST", endpoint, data=data)
+
+    def get_folder_web_url(self, drive_id: str, item_id: str) -> Optional[str]:
+        """
+        Get the web URL of a SharePoint folder.
+        
+        Args:
+            drive_id: SharePoint drive ID
+            item_id: Folder item ID
+            
+        Returns:
+            Optional[str]: Web URL if available, None otherwise
+        """
+        try:
+            endpoint = f"/drives/{drive_id}/items/{item_id}"
+            response = self.graph_request("GET", endpoint)
+            
+            # Try to get webUrl from the response
+            web_url = response.get('webUrl')
+            if web_url:
+                logger.info(f"Found web URL for folder {item_id}: {web_url}")
+                return web_url
+            
+            # If no webUrl, try to create a sharing link
+            logger.info(f"No web URL found for folder {item_id}, creating sharing link")
+            share_response = self.share_folder_with_anyone_link(drive_id, item_id)
+            web_url = share_response.get('link', {}).get('webUrl')
+            
+            if web_url:
+                logger.info(f"Created sharing link for folder {item_id}: {web_url}")
+                return web_url
+            
+            logger.warning(f"Could not get web URL for folder {item_id}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to get web URL for folder {item_id}: {e}")
+            return None
 
 
 # Global Graph client instance

@@ -6,7 +6,7 @@ Handles parsing folder links and copying template folders.
 import re
 import logging
 import time
-from typing import Tuple, Dict, Any, List
+from typing import Tuple, Dict, Any, List, Optional
 from urllib.parse import urlparse, parse_qs, unquote
 from .graph_client import graph_client
 from .storage import storage_client, Template
@@ -321,6 +321,75 @@ class FolderManager:
         except Exception as e:
             logger.error(f"Failed to create folder '{folder_name}': {e}")
             raise
+
+    def find_submittals_folder(self, drive_id: str, parent_folder_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Find the "Submittals" folder among the copied template folders.
+        
+        Args:
+            drive_id: SharePoint drive ID
+            parent_folder_id: Parent folder ID where templates were copied
+            
+        Returns:
+            Optional[Dict[str, Any]]: Folder information if found, None otherwise
+        """
+        try:
+            # List all items in the parent folder
+            items = graph_client.get_drive_items(drive_id, parent_folder_id)
+            
+            for item in items.get('value', []):
+                if item.get('folder') is not None:  # It's a folder
+                    folder_name = item.get('name', '')
+                    
+                    # Check if folder name contains "Submittals" (case-insensitive)
+                    if 'submittals' in folder_name.lower():
+                        logger.info(f"Found Submittals folder: {folder_name} (ID: {item.get('id')})")
+                        return item
+            
+            logger.warning("No Submittals folder found among copied templates")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to find Submittals folder: {e}")
+            return None
+
+    def get_submittals_folder_url(self, drive_id: str, parent_folder_id: str) -> Optional[str]:
+        """
+        Find the Submittals folder and get its web URL with "anyone with the link" permissions.
+        
+        Args:
+            drive_id: SharePoint drive ID
+            parent_folder_id: Parent folder ID where templates were copied
+            
+        Returns:
+            Optional[str]: Web URL of the Submittals folder if found, None otherwise
+        """
+        try:
+            # Find the Submittals folder
+            submittals_folder = self.find_submittals_folder(drive_id, parent_folder_id)
+            
+            if not submittals_folder:
+                logger.error("Submittals folder not found")
+                return None
+            
+            folder_id = submittals_folder.get('id')
+            if not folder_id:
+                logger.error("Submittals folder found but no ID available")
+                return None
+            
+            # Get the web URL (this will create a sharing link if needed)
+            web_url = graph_client.get_folder_web_url(drive_id, folder_id)
+            
+            if web_url:
+                logger.info(f"Successfully got web URL for Submittals folder: {web_url}")
+                return web_url
+            else:
+                logger.error("Failed to get web URL for Submittals folder")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to get Submittals folder URL: {e}")
+            return None
 
 
 # Global folder manager instance

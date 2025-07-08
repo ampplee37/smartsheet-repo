@@ -21,6 +21,21 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def get_column_id_to_name(client, sheet_id: int) -> dict:
+    """
+    Return a mapping of column ID (as str) to column name for the given sheet.
+    """
+    try:
+        if not client:
+            return {}
+        sheet = client.Sheets.get_sheet(sheet_id, include='columnDefinitions')
+        columns = sheet.columns
+        return {str(col.id): col.title for col in columns}
+    except Exception as e:
+        logger.error(f"Failed to get column ID to name mapping: {e}")
+        return {}
+
+
 class SmartsheetListener:
     """Handles Smartsheet webhook events and data processing."""
     
@@ -99,123 +114,86 @@ class SmartsheetListener:
     def extract_row_data(self, webhook_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Extract relevant row data from webhook payload.
-        
-        Args:
-            webhook_data: Parsed webhook data
-            
-        Returns:
-            Optional[Dict[str, Any]]: Extracted row data if relevant, None otherwise
+        Now supports both 'updated' and 'created' events for rows and cells.
         """
         try:
-            # Check if this is a webhook with events array (new format)
             events = webhook_data.get('events', [])
             if events:
                 logger.info(f"Found {len(events)} events in webhook payload")
-                
-                # Look for row update events OR cell update events
                 row_events = []
                 for event in events:
                     object_type = event.get('objectType')
                     event_type = event.get('eventType')
                     
-                    logger.info(f"Processing event: objectType={object_type}, eventType={event_type}")
-                    
-                    # Handle both row.updated and cell.updated events
-                    if object_type == 'row' and event_type == 'updated':
+                    # Handle row events
+                    if object_type == 'row' and event_type in ('updated', 'created'):
                         row_events.append(event)
-                        logger.info(f"Added row update event for row {event.get('id')}")
-                    elif object_type == 'cell' and event_type == 'updated':
-                        # For cell updates, we need to get the rowId from the cell event
-                        row_id = event.get('rowId')
+                    
+                    # Handle cell events - convert to row events for processing
+                    elif object_type == 'cell' and event_type in ('updated', 'created'):
+                        # Check if this is a Sales Stage column update
                         column_id = event.get('columnId')
-                        
-                        logger.info(f"Found cell update event: rowId={row_id}, columnId={column_id}")
-                        
-                        # Log the specific column we're monitoring
-                        if column_id == '593432251944836':
-                            logger.info(f"*** SALES STAGE COLUMN UPDATED *** - Row: {row_id}, Column: {column_id}")
-                        
-                        if row_id:
-                            # Convert cell event to row event format for processing
+                        logger.info(f"Processing cell event: columnId={column_id} (type: {type(column_id)}), expected: '593432251944836'")
+                        if str(column_id) == '593432251944836':  # Sales Stage column
+                            logger.info(f"Found Sales Stage cell update event: rowId={event.get('rowId')}, columnId={column_id}")
                             row_event = {
                                 'objectType': 'row',
                                 'eventType': 'updated',
-                                'id': row_id,
-                                'userId': event.get('userId'),
-                                'timestamp': event.get('timestamp')
+                                'event_type': 'updated',  # Ensure consistency
+                                'id': event.get('rowId'),
+                                'sheetId': webhook_data.get('scopeObjectId'),
                             }
+                            logger.info(f"Converted Sales Stage cell update event to row event for row {event.get('rowId')}")
                             row_events.append(row_event)
-                            logger.info(f"Converted cell update event to row event for row {row_id}")
+                        else:
+                            logger.info(f"Ignoring cell update for non-Sales Stage column: {column_id}")
+                    
+                    # Handle other cell created events (legacy support)
+                    elif object_type == 'cell' and event_type == 'created':
+                        # Convert cell created event to row event
+                        logger.info(f"Found cell created event: rowId={event.get('rowId')}, columnId={event.get('columnId')}")
+                        row_event = {
+                            'objectType': 'row',
+                            'eventType': 'created',
+                            'event_type': 'created',  # Ensure consistency
+                            'id': event.get('rowId'),
+                            'sheetId': webhook_data.get('scopeObjectId'),
+                        }
+                        logger.info(f"Converted cell created event to row event for row {event.get('rowId')}")
+                        row_events.append(row_event)
                 
                 if not row_events:
-                    logger.info("No row update or cell update events found in webhook payload")
+                    logger.info("No row events found in webhook payload")
                     return None
                 
-                # Use the first row event
+                # For now, just process the first row event
                 row_event = row_events[0]
                 row_id = row_event.get('id')
-                sheet_id = webhook_data.get('scopeObjectId')
+                sheet_id = row_event.get('sheetId') or webhook_data.get('scopeObjectId')
                 
-                logger.info(f"Found row update event for row {row_id} in sheet {sheet_id}")
-                
-                # For row updates, we need to fetch the actual row data from Smartsheet API
-                # since the webhook doesn't include the full row data
-                if self.client and row_id and sheet_id:
-                    try:
-                        row_details = self.get_row_details(int(sheet_id), int(row_id))
-                        
-                        # Log the Sales Stage value specifically
-                        cells = row_details.get('cells', {})
-                        sales_stage_value = cells.get('593432251944836')
-                        logger.info(f"*** SALES STAGE VALUE FOR ROW {row_id}: '{sales_stage_value}' ***")
-                        
-                        # Ensure row_id is properly set in the returned data
-                        row_details['row_id'] = row_details.get('id')
-                        return row_details
-                    except Exception as e:
-                        logger.error(f"Failed to get row details for row {row_id}: {e}")
-                        return None
-                else:
-                    logger.warning("Cannot fetch row details - missing client, row_id, or sheet_id")
+                if not row_id or not sheet_id:
+                    logger.error("Missing row_id or sheet_id in row event")
                     return None
-            
-            # Legacy format check (single eventType) - only process if no events array was found
-            event_type = webhook_data.get('eventType')
-            if event_type != 'ROW_UPDATED':
-                logger.info(f"Ignoring non-row-update event: {event_type}")
+                
+                logger.info(f"Found row event for row {row_id} in sheet {sheet_id}")
+                row_details = self.get_row_details(int(sheet_id), int(row_id))
+                
+                if not row_details:
+                    logger.error(f"Failed to get details for row {row_id} in sheet {sheet_id}")
+                    return None
+                
+                # Attach event_type for downstream logic
+                row_details['event_type'] = row_event.get('event_type') or row_event.get('eventType')
+                row_details['row_id'] = row_id
+                row_details['sheet_id'] = sheet_id
+                return row_details
+            else:
+                logger.info("No events found in webhook payload")
                 return None
-            
-            # Extract row information (legacy format)
-            row_data = webhook_data.get('row', {})
-            if not row_data:
-                logger.warning("No row data found in webhook payload")
-                return None
-            
-            # Extract cell data
-            cells = row_data.get('cells', [])
-            cell_data = {}
-            
-            for cell in cells:
-                column_id = cell.get('columnId')
-                value = cell.get('value')
-                cell_data[column_id] = value
-            
-            # Extract row ID and other metadata
-            result = {
-                'row_id': row_data.get('id'),
-                'sheet_id': webhook_data.get('objectId'),
-                'cells': cell_data,
-                'modified_at': row_data.get('modifiedAt'),
-                'row_number': row_data.get('rowNumber')
-            }
-            
-            logger.info(f"Extracted row data for row {result['row_id']}")
-            return result
-            
         except Exception as e:
-            logger.error(f"Failed to extract row data: {e}")
+            logger.error(f"Error extracting row data: {e}")
             return None
-    
+
     def is_closed_won_deal(self, row_data: Dict[str, Any], sales_stage_column_id: str) -> bool:
         """
         Check if the row represents a "Closed Won" deal.
@@ -349,42 +327,42 @@ class SmartsheetListener:
     def get_row_details(self, sheet_id: int, row_id: int) -> Dict[str, Any]:
         """
         Get detailed information about a specific row.
-        
-        Args:
-            sheet_id: Smartsheet ID
-            row_id: Row ID
-            
-        Returns:
-            Dict[str, Any]: Row details
-            
-        Raises:
-            Exception: If API call fails
+        Now includes displayValue and hyperlink for each cell.
+        Ensures hyperlink is always a dict if present.
         """
         try:
             if not self.client:
                 raise Exception("Smartsheet client not initialized")
-                
             row = self.client.Sheets.get_row(sheet_id, row_id)
-            
-            # Extract cell values
             cells = {}
             for cell in row.cells:
-                if hasattr(cell, 'column_id') and hasattr(cell, 'value'):
-                    cells[str(cell.column_id)] = cell.value
-            
-            result = {
+                if hasattr(cell, 'column_id'):
+                    # Normalize hyperlink to dict if present
+                    hyperlink = None
+                    if hasattr(cell, 'hyperlink') and cell.hyperlink:
+                        h = cell.hyperlink
+                        if hasattr(h, 'url'):
+                            hyperlink = {
+                                'url': getattr(h, 'url', None),
+                                'label': getattr(h, 'label', None)
+                            }
+                        elif isinstance(h, dict):
+                            hyperlink = h
+                        else:
+                            hyperlink = None
+                    cell_info = {
+                        'value': getattr(cell, 'value', None),
+                        'displayValue': getattr(cell, 'display_value', None) or getattr(cell, 'displayValue', None),
+                        'hyperlink': hyperlink
+                    }
+                    cells[str(cell.column_id)] = cell_info
+            return {
                 'id': row.id,
-                'row_number': row.row_number,
-                'cells': cells,
-                'modified_at': row.modified_at.isoformat() if row.modified_at else None
+                'cells': cells
             }
-            
-            logger.info(f"Retrieved details for row {row_id}")
-            return result
-            
         except Exception as e:
-            logger.error(f"Failed to get row details for {row_id}: {e}")
-            raise
+            logger.error(f"Error getting row details for {row_id}: {e}")
+            return {}
     
     def validate_webhook_challenge(self, challenge: str) -> str:
         """
@@ -461,7 +439,14 @@ class SmartsheetListener:
         """
         try:
             cells = row_data.get('cells', {})
-            sales_stage = cells.get('593432251944836')  # Sales Stage column ID
+            sales_stage_cell = cells.get('593432251944836', {})  # Sales Stage column ID
+            
+            # Handle new cell data structure (dict with value/displayValue)
+            if isinstance(sales_stage_cell, dict):
+                sales_stage = sales_stage_cell.get('displayValue') or sales_stage_cell.get('value')
+            else:
+                # Handle legacy cell data structure (direct value)
+                sales_stage = sales_stage_cell
             
             # Only process if sales stage is "Closed Won"
             if sales_stage != 'Closed Won':
@@ -469,8 +454,19 @@ class SmartsheetListener:
                 return False
             
             # Check if we have the required project data
-            project_id = cells.get('3408182019051396')  # Opportunity ID
-            project_type = cells.get('5878702367002500')  # Project Category
+            project_id_cell = cells.get('3408182019051396', {})  # Opportunity ID
+            project_type_cell = cells.get('5878702367002500', {})  # Project Category
+            
+            # Handle new cell data structure for project data
+            if isinstance(project_id_cell, dict):
+                project_id = project_id_cell.get('displayValue') or project_id_cell.get('value')
+            else:
+                project_id = project_id_cell
+                
+            if isinstance(project_type_cell, dict):
+                project_type = project_type_cell.get('displayValue') or project_type_cell.get('value')
+            else:
+                project_type = project_type_cell
             
             if not project_id or not project_type:
                 logger.info("Missing project_id or project_type, row change not meaningful")
@@ -538,7 +534,55 @@ class SmartsheetListener:
                 return None
             
             logger.info(f"Row data extracted for row {row_data.get('row_id')}")
-            
+
+            # --- Determine Sales Stage and trigger appropriate logic ---
+            cells = row_data.get('cells', {})
+            sales_stage_cell = cells.get('593432251944836', {})
+            sales_stage = sales_stage_cell.get('displayValue') or sales_stage_cell.get('value') or ""
+            opportunity_stages = [
+                "1 - Rumor",
+                "2 - Identified",
+                "3 - Qualified",
+                "4 - Proposed 50",
+                "4 - Proposed 75",
+                "4 - Proposed 90",
+            ]
+            event_type = row_data.get('event_type')
+            # For new rows, always process if sales stage is in opportunity stages
+            if event_type == 'created' and sales_stage in opportunity_stages:
+                logger.info(f"New row created with sales stage '{sales_stage}', triggering Opportunity Notebook logic.")
+                try:
+                    from src.onenote_manager import onenote_manager
+                    opportunity_notebook_id = "1-967d595f-41fe-4f39-ae85-d82f0e9211b3"
+                    opportunity_site_id = "bvcollective.sharepoint.com,a3c779e2-668d-4151-963c-eba6bb48c8c4,3eb6c052-ce82-4449-a860-470b0025611f"
+                    customer_name = cells.get('1475623376867204', {}).get('displayValue') or cells.get('1475623376867204', {}).get('value') or "Unknown Customer"
+                    opp_id = cells.get('3408182019051396', {}).get('displayValue') or cells.get('3408182019051396', {}).get('value') or ""
+                    project_name = cells.get('3534360453271428', {}).get('displayValue') or cells.get('3534360453271428', {}).get('value') or ""
+                    sheet_id = row_data.get('sheet_id')
+                    if not sheet_id:
+                        logger.error("No sheet_id found in row_data; skipping Opportunity Notebook integration.")
+                    else:
+                        column_id_to_name = get_column_id_to_name(self.client, int(sheet_id)) or {}
+                        result = onenote_manager.add_opportunity_page_for_row(
+                            site_id=opportunity_site_id,
+                            notebook_id=opportunity_notebook_id,
+                            customer_name=customer_name,
+                            opp_id=opp_id,
+                            project_name=project_name,
+                            row_data=cells,
+                            column_id_to_name=column_id_to_name
+                        )
+                        logger.info(f"Opportunity Notebook result: {result}")
+                except Exception as e:
+                    logger.error(f"Error in Opportunity Notebook integration: {e}")
+            # For updates, require meaningful change
+            elif event_type == 'updated':
+                if sales_stage in opportunity_stages:
+                    # Existing logic for meaningful change (if any)
+                    # ... existing code ...
+                    pass
+            # Existing logic for Closed Won and other cases
+
             # Check if the row has actually changed meaningfully
             if not self._has_row_actually_changed(row_data):
                 logger.info("Row has not changed meaningfully, skipping processing")
@@ -548,16 +592,32 @@ class SmartsheetListener:
             cells = row_data.get('cells', {})
             logger.info(f"Found {len(cells)} cells in row data")
             
-            sales_stage = cells.get('593432251944836')
+            # Handle new cell data structure for sales stage
+            sales_stage_cell = cells.get('593432251944836', {})
+            if isinstance(sales_stage_cell, dict):
+                sales_stage = sales_stage_cell.get('displayValue') or sales_stage_cell.get('value')
+            else:
+                sales_stage = sales_stage_cell
             logger.info(f"Sales stage value: {sales_stage}")
             
             if sales_stage != 'Closed Won':
                 logger.info(f"Sales stage is not 'Closed Won' (got: {sales_stage}), ignoring event")
                 return None
             
-            # Extract project_id and project_type
-            project_id = cells.get('3408182019051396')
-            project_type = cells.get('5878702367002500')
+            # Extract project_id and project_type with new cell data structure
+            project_id_cell = cells.get('3408182019051396', {})
+            project_type_cell = cells.get('5878702367002500', {})
+            
+            if isinstance(project_id_cell, dict):
+                project_id = project_id_cell.get('displayValue') or project_id_cell.get('value')
+            else:
+                project_id = project_id_cell
+                
+            if isinstance(project_type_cell, dict):
+                project_type = project_type_cell.get('displayValue') or project_type_cell.get('value')
+            else:
+                project_type = project_type_cell
+                
             logger.info(f"Project ID: {project_id}, Project Type: {project_type}")
             
             if not project_id or not project_type:

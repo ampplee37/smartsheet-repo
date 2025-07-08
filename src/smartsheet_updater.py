@@ -11,6 +11,29 @@ from src.config import config
 
 logger = logging.getLogger(__name__)
 
+def get_display_text(cell):
+    """
+    Extract the display value for a cell, or value, or empty string.
+    If the cell has a hyperlink, return an HTML link.
+    If the value looks like an email, return a mailto link.
+    """
+    if isinstance(cell, dict):
+        display = cell.get('displayValue') or cell.get('value') or ''
+        hyperlink = cell.get('hyperlink')
+        # If hyperlink is a dict with a url, render as a link
+        if hyperlink and isinstance(hyperlink, dict) and hyperlink.get('url'):
+            url = hyperlink['url']
+            label = display or hyperlink.get('label') or url
+            return f'<a href="{url}">{label}</a>'
+        # If value looks like an email, render as mailto
+        value = cell.get('value')
+        if value and isinstance(value, str) and '@' in value and not display:
+            return f'<a href="mailto:{value}">{value}</a>'
+        return display
+    elif isinstance(cell, str) and '@' in cell:
+        return f'<a href="mailto:{cell}">{cell}</a>'
+    return str(cell) if cell is not None else ''
+
 class SmartsheetUpdater:
     """
     Handles Smartsheet API operations for updating rows with OneNote URLs.
@@ -64,6 +87,9 @@ class SmartsheetUpdater:
             
             # Use project description as display text if available, otherwise use notebook name
             display_text = project_description or notebook_name
+            
+            # Use get_display_text to ensure display_text is a string
+            display_text = get_display_text(display_text)
             
             if not display_text:
                 logger.error("No display text provided for OneNote link")
@@ -125,6 +151,68 @@ class SmartsheetUpdater:
         except Exception as e:
             logger.error(f"Error getting sheet info for {sheet_id}: {e}")
             return None
+
+    def update_submittals_folder_link(
+        self, 
+        sheet_id: int, 
+        row_id: int, 
+        project_name: str, 
+        folder_url: str
+    ) -> bool:
+        """
+        Update the Submittals folder hyperlink column in Smartsheet.
+        
+        Args:
+            sheet_id: Smartsheet sheet ID
+            row_id: Row ID to update
+            project_name: Project name to use as display text
+            folder_url: URL of the Submittals folder
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Column ID for "Submittals Folder" column
+            submittals_column_id = 6100803036860292
+            
+            logger.info(f"Updating Smartsheet row {row_id} with Submittals folder URL: {folder_url}")
+            logger.info(f"Display text: {project_name}")
+            
+            # Use get_display_text to ensure display_text is a string
+            display_text = get_display_text(project_name)
+            
+            # Use raw API format
+            payload = {
+                "id": row_id,
+                "cells": [
+                    {
+                        "columnId": submittals_column_id,
+                        "value": display_text,
+                        "hyperlink": {
+                            "url": folder_url
+                        }
+                    }
+                ]
+            }
+            
+            headers = {
+                'Authorization': f'Bearer {self.token}',
+                'Content-Type': 'application/json'
+            }
+            
+            url = f"https://api.smartsheet.com/2.0/sheets/{sheet_id}/rows"
+            response = requests.put(url, headers=headers, json=payload)
+            
+            if response.status_code == 200:
+                logger.info(f"Successfully updated Smartsheet row {row_id} with Submittals folder URL")
+                return True
+            else:
+                logger.error(f"Failed to update Smartsheet row {row_id}: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error updating Smartsheet row {row_id} with Submittals folder URL: {e}")
+            return False
 
 # Global instance
 smartsheet_updater = SmartsheetUpdater() 
