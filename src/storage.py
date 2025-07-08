@@ -7,6 +7,7 @@ import logging
 from typing import List, Optional, Dict, Any
 from azure.data.tables import TableServiceClient
 from azure.core.exceptions import ResourceNotFoundError, AzureError
+from datetime import datetime, timedelta
 try:
     from .config import config
 except ImportError:
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 class Template:
     """Template mapping data class."""
     
-    def __init__(self, partition_key: str, row_key: str, template_folder_id: str, site_id: str = None, drive_id: str = None):
+    def __init__(self, partition_key: str, row_key: str, template_folder_id: str, site_id: Optional[str] = None, drive_id: Optional[str] = None):
         """
         Initialize a Template instance.
         
@@ -100,6 +101,10 @@ class StorageClient:
             Exception: If table operation fails
         """
         try:
+            if not self.table_client:
+                logger.warning("Table client not initialized, cannot get templates")
+                return []
+                
             # Query templates by partition key (category)
             query_filter = f"PartitionKey eq '{category}'"
             entities = self.table_client.query_entities(query_filter)
@@ -107,11 +112,11 @@ class StorageClient:
             templates = []
             for entity in entities:
                 template = Template(
-                    partition_key=entity.get("PartitionKey"),
-                    row_key=entity.get("RowKey"),
-                    template_folder_id=entity.get("templateFolderId"),
-                    site_id=entity.get("SiteID"),
-                    drive_id=entity.get("DriveID")
+                    partition_key=entity.get("PartitionKey") or "",
+                    row_key=entity.get("RowKey") or "",
+                    template_folder_id=entity.get("templateFolderId") or "",
+                    site_id=entity.get("SiteID") or "",
+                    drive_id=entity.get("DriveID") or ""
                 )
                 templates.append(template)
             
@@ -140,6 +145,10 @@ class StorageClient:
             Exception: If table operation fails
         """
         try:
+            if not self.table_client:
+                logger.warning("Table client not initialized, cannot get template")
+                return None
+                
             # Get specific entity by partition key and row key
             entity = self.table_client.get_entity(
                 partition_key=category,
@@ -147,11 +156,11 @@ class StorageClient:
             )
             
             template = Template(
-                partition_key=entity.get("PartitionKey"),
-                row_key=entity.get("RowKey"),
-                template_folder_id=entity.get("templateFolderId"),
-                site_id=entity.get("SiteID"),
-                drive_id=entity.get("DriveID")
+                partition_key=entity.get("PartitionKey") or "",
+                row_key=entity.get("RowKey") or "",
+                template_folder_id=entity.get("templateFolderId") or "",
+                site_id=entity.get("SiteID") or "",
+                drive_id=entity.get("DriveID") or ""
             )
             
             logger.info(f"Retrieved template '{template_name}' for category '{category}'")
@@ -175,6 +184,10 @@ class StorageClient:
             Exception: If table operation fails
         """
         try:
+            if not self.table_client:
+                logger.warning("Table client not initialized, cannot list categories")
+                return []
+                
             # Query all entities and extract unique partition keys
             entities = self.table_client.list_entities()
             categories = set()
@@ -192,7 +205,7 @@ class StorageClient:
             logger.error(f"Failed to list categories: {e}")
             raise Exception(f"Failed to list categories: {e}")
     
-    def add_template(self, category: str, template_name: str, template_folder_id: str, site_id: str = None, drive_id: str = None) -> bool:
+    def add_template(self, category: str, template_name: str, template_folder_id: str, site_id: Optional[str] = None, drive_id: Optional[str] = None) -> bool:
         """
         Add a new template mapping.
         
@@ -210,6 +223,10 @@ class StorageClient:
             Exception: If table operation fails
         """
         try:
+            if not self.table_client:
+                logger.warning("Table client not initialized, cannot add template")
+                return False
+                
             entity = {
                 "PartitionKey": category,
                 "RowKey": template_name,
@@ -228,7 +245,7 @@ class StorageClient:
             logger.error(f"Failed to add template '{template_name}' for category '{category}': {e}")
             raise Exception(f"Failed to add template: {e}")
     
-    def update_template(self, category: str, template_name: str, template_folder_id: str, site_id: str = None, drive_id: str = None) -> bool:
+    def update_template(self, category: str, template_name: str, template_folder_id: str, site_id: Optional[str] = None, drive_id: Optional[str] = None) -> bool:
         """
         Update an existing template mapping.
         
@@ -246,6 +263,10 @@ class StorageClient:
             Exception: If table operation fails
         """
         try:
+            if not self.table_client:
+                logger.warning("Table client not initialized, cannot update template")
+                return False
+                
             entity = {
                 "PartitionKey": category,
                 "RowKey": template_name,
@@ -282,6 +303,10 @@ class StorageClient:
             Exception: If table operation fails
         """
         try:
+            if not self.table_client:
+                logger.warning("Table client not initialized, cannot delete template")
+                return False
+                
             self.table_client.delete_entity(
                 partition_key=category,
                 row_key=template_name
@@ -301,6 +326,10 @@ class StorageClient:
             bool: True if table exists or was created, False otherwise
         """
         try:
+            if not self.table_service:
+                logger.warning("Table service not initialized, cannot create table")
+                return False
+                
             self.table_service.create_table_if_not_exists(self.table_name)
             logger.info(f"Table '{self.table_name}' is ready")
             return True
@@ -352,15 +381,15 @@ class StorageClient:
             table_client = self.table_service.get_table_client("BVCSSProjects")
             entity = table_client.get_entity(partition_key="project", row_key=project_type)
             project = Project(
-                partition_key=entity.get("PartitionKey"),
-                row_key=entity.get("RowKey"),
-                company_name=entity.get("CompanyName"),
-                drive_id=entity.get("DriveID"),
-                job_folder_id=entity.get("JobFolderID"),
-                parent_folder_id=entity.get("ParentFolderID"),
-                project_name=entity.get("ProjectName"),
-                project_type=entity.get("ProjectType"),
-                site_id=entity.get("SiteID")
+                partition_key=entity.get("PartitionKey") or "",
+                row_key=entity.get("RowKey") or "",
+                company_name=entity.get("CompanyName") or "",
+                drive_id=entity.get("DriveID") or "",
+                job_folder_id=entity.get("JobFolderID") or "",
+                parent_folder_id=entity.get("ParentFolderID") or "",
+                project_name=entity.get("ProjectName") or "",
+                project_type=entity.get("ProjectType") or "",
+                site_id=entity.get("SiteID") or ""
             )
             logger.info(f"Retrieved project for type '{project_type}': {project}")
             return project
@@ -373,6 +402,190 @@ class StorageClient:
         except Exception as e:
             logger.error(f"Unexpected error getting project for type '{project_type}': {e}")
             return None
+
+
+class StorageManager:
+    """Manages Azure Storage operations."""
+    
+    def __init__(self):
+        """Initialize the storage manager."""
+        if not config.STORAGE_CONNECTION_STRING:
+            logger.warning("No storage connection string provided")
+            self.table_service = None
+        else:
+            self.table_service = TableServiceClient.from_connection_string(
+                config.STORAGE_CONNECTION_STRING
+            )
+    
+    def _ensure_webhook_table_exists(self) -> bool:
+        """
+        Ensure the WebhookDeduplication table exists, create it if it doesn't.
+        
+        Returns:
+            bool: True if table exists or was created successfully, False otherwise
+        """
+        try:
+            if not self.table_service:
+                logger.warning("Storage not configured, cannot ensure webhook table exists")
+                return False
+            
+            table_name = "WebhookDeduplication"
+            
+            # Check if table exists by trying to create it (will fail if already exists)
+            try:
+                self.table_service.create_table(table_name)
+                logger.info(f"Created table {table_name}")
+                return True
+            except Exception as e:
+                # Table already exists or other error
+                if "already exists" in str(e).lower() or "conflict" in str(e).lower():
+                    logger.debug(f"Table {table_name} already exists")
+                    return True
+                else:
+                    logger.error(f"Error creating table {table_name}: {e}")
+                    return False
+                
+        except Exception as e:
+            logger.error(f"Error ensuring webhook table exists: {e}")
+            return False
+    
+    def is_webhook_processed(self, webhook_signature: str, ttl_minutes: int = 30) -> bool:
+        """
+        Check if a webhook has been processed recently using Azure Table Storage.
+        
+        Args:
+            webhook_signature: Unique signature for the webhook event
+            ttl_minutes: Time-to-live in minutes for the webhook record
+            
+        Returns:
+            bool: True if webhook was processed recently, False otherwise
+        """
+        try:
+            if not self.table_service:
+                logger.warning("Storage not configured, cannot check webhook deduplication")
+                return False
+            
+            # Ensure table exists before trying to access it
+            if not self._ensure_webhook_table_exists():
+                logger.warning("Could not ensure webhook table exists, skipping deduplication check")
+                return False
+            
+            table_name = "WebhookDeduplication"
+            table_client = self.table_service.get_table_client(table_name)
+            
+            # Try to get the webhook record
+            try:
+                entity = table_client.get_entity(
+                    partition_key="webhook",
+                    row_key=webhook_signature
+                )
+                
+                # Check if the record is still valid (not expired)
+                created_time = datetime.fromisoformat(entity.get('created_time', ''))
+                if datetime.utcnow() - created_time < timedelta(minutes=ttl_minutes):
+                    logger.info(f"Webhook {webhook_signature} was processed recently")
+                    return True
+                else:
+                    # Record expired, we can process this webhook again
+                    logger.info(f"Webhook {webhook_signature} record expired, allowing reprocessing")
+                    return False
+                    
+            except Exception as e:
+                # Entity not found, webhook hasn't been processed
+                logger.debug(f"Webhook {webhook_signature} not found in storage: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error checking webhook deduplication: {e}")
+            return False
+    
+    def mark_webhook_processed(self, webhook_signature: str) -> bool:
+        """
+        Mark a webhook as processed in Azure Table Storage.
+        
+        Args:
+            webhook_signature: Unique signature for the webhook event
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            if not self.table_service:
+                logger.warning("Storage not configured, cannot mark webhook as processed")
+                return False
+            
+            # Ensure table exists before trying to access it
+            if not self._ensure_webhook_table_exists():
+                logger.warning("Could not ensure webhook table exists, skipping webhook marking")
+                return False
+            
+            table_name = "WebhookDeduplication"
+            table_client = self.table_service.get_table_client(table_name)
+            
+            # Create the entity
+            entity = {
+                'PartitionKey': 'webhook',
+                'RowKey': webhook_signature,
+                'created_time': datetime.utcnow().isoformat(),
+                'processed': True
+            }
+            
+            table_client.upsert_entity(entity)
+            logger.info(f"Marked webhook {webhook_signature} as processed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error marking webhook as processed: {e}")
+            return False
+    
+    def cleanup_expired_webhooks(self, ttl_minutes: int = 60) -> int:
+        """
+        Clean up expired webhook records from storage.
+        
+        Args:
+            ttl_minutes: Time-to-live in minutes
+            
+        Returns:
+            int: Number of records cleaned up
+        """
+        try:
+            if not self.table_service:
+                logger.warning("Storage not configured, cannot cleanup webhooks")
+                return 0
+            
+            # Ensure table exists before trying to access it
+            if not self._ensure_webhook_table_exists():
+                logger.warning("Could not ensure webhook table exists, skipping cleanup")
+                return 0
+            
+            table_name = "WebhookDeduplication"
+            table_client = self.table_service.get_table_client(table_name)
+            
+            cutoff_time = datetime.utcnow() - timedelta(minutes=ttl_minutes)
+            deleted_count = 0
+            
+            # Query for expired records
+            query = f"PartitionKey eq 'webhook' and created_time lt '{cutoff_time.isoformat()}'"
+            
+            entities = table_client.query_entities(query)
+            for entity in entities:
+                try:
+                    table_client.delete_entity(
+                        partition_key=entity['PartitionKey'],
+                        row_key=entity['RowKey']
+                    )
+                    deleted_count += 1
+                except Exception as e:
+                    logger.error(f"Error deleting expired webhook record: {e}")
+            
+            if deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} expired webhook records")
+            
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Error cleaning up expired webhooks: {e}")
+            return 0
 
 
 # Global storage client instance

@@ -114,8 +114,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         try:
             event_data = smartsheet_listener.process_webhook_event(
                 payload=body,
-                signature=signature,
-                webhook_secret=webhook_secret
+                signature=signature or "",
+                webhook_secret=webhook_secret or ""
             )
             logger.info(f"Webhook event processed, result: {event_data is not None}")
             if event_data:
